@@ -1,0 +1,25 @@
+                                                                                
+{
+    "main":    "vertx_pg.VertxPg3",
+    "options":
+        { "config":
+          {
+
+            "module.name":           "vertx_pg",
+            "module.id":             "test",
+
+            "eb.system_status":      "tfc.system_status",
+            "eb.console_out":        "tfc.console_out",
+            "eb.manager":            "tfc.manager",
+
+            "vertx_pg.log_level":     1,
+
+            "vertx_pg.address": "tfc.msgrouter.test",
+
+            "vertx_pg.db.url":  "jdbc:postgresql:tfcserver",
+            "vertx_pg.db.user": "ijl20",
+            "vertx_pg.db.password": "foo!1"
+
+          }
+        }
+}
