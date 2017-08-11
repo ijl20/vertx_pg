@@ -1,9 +1,9 @@
-package vertx_pg;
+package uk.ac.cam.tfc_server.msgrouter;
 
 // *************************************************************************************************
 // *************************************************************************************************
 // *************************************************************************************************
-// MsgRouterPg.java
+// MsgRouter.java
 //
 // This module receives messages from the EventBus and POSTs them on to application destinations
 //
@@ -34,9 +34,12 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.HashMap;
 
-public class MsgRouterPg extends AbstractVerticle {
+import uk.ac.cam.tfc_server.util.Constants;
+import uk.ac.cam.tfc_server.util.Log;
 
-    private final String VERSION = "0.07";
+public class MsgRouter extends AbstractVerticle {
+
+    private final String VERSION = "0.08";
     
     // from config()
     public int LOG_LEVEL;             // optional in config(), defaults to Constants.LOG_INFO

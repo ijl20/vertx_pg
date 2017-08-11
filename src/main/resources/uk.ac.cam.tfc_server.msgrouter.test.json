@@ -1,27 +1,27 @@
                                                                                 
 {
-    "main":    "vertx_pg.MsgRouterPg",
+    "main":    "uk.ac.cam.tfc_server.msgrouter.MsgRouter",
     "options":
         { "config":
           {
 
-            "module.name":           "msgrouter_pg",
+            "module.name":           "msgrouter",
             "module.id":             "test",
 
             "eb.system_status":      "tfc.system_status",
             "eb.console_out":        "tfc.console_out",
             "eb.manager":            "tfc.manager",
 
-            "msgrouter_pg.log_level":     1,
+            "msgrouter.log_level":     1,
 
-            "msgrouter_pg.address": "tfc.msgrouter.test",
+            "msgrouter.address": "tfc.msgrouter.test",
 
-            "msgrouter_pg.db.url":      "jdbc:postgresql:tfcserver",
-            "msgrouter_pg.db.user":     "ijl20",
-            "msgrouter_pg.db.password": "foo!1",
+            "msgrouter.db.url":      "jdbc:postgresql:tfcserver",
+            "msgrouter.db.user":     "ijl20",
+            "msgrouter.db.password": "foo!1",
             "comment": "That password above is temporary...",
 
-            "msgrouter_pg.routers":
+            "msgrouter.routers":
             [
                 { 
                     "source_address": "tfc.everynet_feed.test",
