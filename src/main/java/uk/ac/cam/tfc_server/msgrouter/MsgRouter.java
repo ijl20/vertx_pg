@@ -31,6 +31,8 @@ import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.HttpClientRequest;
 
 import java.io.*;
+import java.net.URL;
+import java.net.MalformedURLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -252,7 +254,7 @@ public class MsgRouter extends AbstractVerticle {
             case Constants.METHOD_ADD_SENSOR:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                            ": received add_sensor manager message on "+EB_MANAGER);
-                JsonObject sensor_info = msg.getJsonObject("params");
+                JsonObject sensor_info = msg.getJsonObject("params").getJsonObject("info");
                 if (sensor_info == null)
                 {
                     logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
@@ -265,7 +267,7 @@ public class MsgRouter extends AbstractVerticle {
             case Constants.METHOD_REMOVE_SENSOR:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                            ": received remove_sensor manager message on "+EB_MANAGER);
-                sensor_info = msg.getJsonObject("params");
+                sensor_info = msg.getJsonObject("params").getJsonObject("info");
                 if (sensor_info == null)
                 {
                     logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
@@ -278,7 +280,7 @@ public class MsgRouter extends AbstractVerticle {
             case Constants.METHOD_ADD_DESTINATION:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                            ": received add_destination manager message on "+EB_MANAGER);
-                JsonObject destination_info = msg.getJsonObject("params");
+                JsonObject destination_info = msg.getJsonObject("params").getJsonObject("info");
                 if (destination_info == null)
                 {
                     logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
@@ -291,7 +293,7 @@ public class MsgRouter extends AbstractVerticle {
             case Constants.METHOD_REMOVE_DESTINATION:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                            ": received remove_destination manager message on "+EB_MANAGER);
-                destination_info = msg.getJsonObject("params");
+                destination_info = msg.getJsonObject("params").getJsonObject("info");
                 if (destination_info == null)
                 {
                     logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
@@ -309,10 +311,10 @@ public class MsgRouter extends AbstractVerticle {
 
     }
 
-    // Add a LoraWAN sensor to sensors, having received an 'add_sensor' manager message
-    private void add_sensor(JsonObject params)
+    // Add a sensor to sensors, having received an 'add_sensor' manager message
+    private void add_sensor(JsonObject sensor_info)
     {
-        String sensor_id = params.getString("sensor_id");
+        String sensor_id = sensor_info.getString("sensor_id");
         if (sensor_id == null)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
@@ -321,7 +323,7 @@ public class MsgRouter extends AbstractVerticle {
         }
         
         // create a Sensor object for this sensor
-        Sensor sensor = new Sensor(params);
+        Sensor sensor = new Sensor(sensor_info);
 
         // add the sensor to the current list (HashMap)
         sensors.put(sensor_id, sensor);
@@ -331,9 +333,9 @@ public class MsgRouter extends AbstractVerticle {
     }
 
     // Remove a LoraWAN sensor from sensors, having received a 'remove_sensor' manager message
-    private void remove_sensor(JsonObject params)
+    private void remove_sensor(JsonObject sensor_info)
     {
-        String sensor_id = params.getString("sensor_id");
+        String sensor_id = sensor_info.getString("sensor_id");
         if (sensor_id == null)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
@@ -360,12 +362,21 @@ public class MsgRouter extends AbstractVerticle {
             return;
         }
 
-        // Create Destination object for this destination
-        Destination destination = new Destination(destination_info);
+        try
+        {
+            // Create Destination object for this destination
+            Destination destination = new Destination(destination_info);
 
-        // Add to the current list (HashMap) of objects
-        destinations.put(destination_id, destination);
-
+            // Add to the current list (HashMap) of objects
+            destinations.put(destination_id, destination);
+        }
+        catch (MalformedURLException e)
+        {
+            logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                   ": Bad URL for destination "+destination_id);
+            return;
+        }
+        
         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                    ": destination count now "+destinations.size());
     }
@@ -505,7 +516,7 @@ public class MsgRouter extends AbstractVerticle {
                 else
                 {
                     // There is no destination_id defined in the config(), so we'll try and route via
-                    // the loraWAN dev_eui -> destination_id mapping in the sensors HashMap
+                    // the sensor_id -> destination_id mapping in the sensors HashMap
                     String dev_eui = msg.getString("dev_eui");
                     if (dev_eui == null)
                     {
@@ -520,7 +531,7 @@ public class MsgRouter extends AbstractVerticle {
 
                     try
                     {
-                        destination_id = json_property_to_string(sensors.get(dev_eui).dev_info, "destination_id");
+                        destination_id = json_property_to_string(sensors.get(dev_eui).info, "destination_id");
                     }
                     catch (Exception NullPointerException)
                     {
@@ -615,24 +626,24 @@ public class MsgRouter extends AbstractVerticle {
     // received in the 'params' property of the 'add_sensor' eventbus method message
     private class Sensor {
         public String sensor_id;
-        public JsonObject dev_info;
+        public JsonObject info;
         // e.g. {
         //        "sensor_id": "0018b2000000113e",
         //        "destination_id": "0018b2000000abcd"
         //      }
 
         // Constructor
-        Sensor(JsonObject params)
+        Sensor(JsonObject sensor_info)
         {
-            sensor_id = params.getString("sensor_id");
-            dev_info = params;
+            sensor_id = sensor_info.getString("sensor_id");
+            info = sensor_info;
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                  ": added sensor "+this.toString());
         }
 
         public String toString()
         {
-            return sensor_id + " -> " + json_property_to_string(dev_info, "destination_id");
+            return sensor_id + " -> " + json_property_to_string(info, "destination_id");
         }
     }
 
@@ -643,43 +654,92 @@ public class MsgRouter extends AbstractVerticle {
         public JsonObject info;
         public HttpClient http_client;
 
-        // e.g. {
-        //        "destination_id": "0018b2000000abcd",
-        //        "http.post": true,
-        //        "http.host": "localhost",
-        //        "http.port": 8098,
-        //        "http.uri": "/everynet_feed/test/adeunis_test3",
-        //        "http.ssl": false,
-        //        "http.token": "test-msgrouter-post"
-        //      }
+        private class UrlParts {
+            public boolean http_ssl;
+            public int     http_port;
+            public String  http_host;
+            public String  http_path;
+        }
+
+        // { "destination_id": "xyz",
+        //   "http_token":"foo!bar",
+        //   "url": "http://localhost:8080/efgh"
+        // }
 
         // Constructor
-        Destination(JsonObject destination_info)
+        // Here is where we create a new Destination on receipt of a "add_destination" message or
+        // loading rows from database table csn_destinations
+        //
+        Destination(JsonObject destination_info) throws MalformedURLException
         {
+            // destination_id is the definitive key
+            // Will be used as lookup in "destinations" HashMap
             destination_id = json_property_to_string(destination_info, "destination_id");
 
+            // And store entire Json payload into "info"
             info = destination_info;
+            
+            // The user originally gave a URL, which could be malformed, if so this will throw an
+            // exception
+            UrlParts u = parse_url(destination_info.getString("url"));
+
+            // inject http_path into the destination "info"
+            info.put("http_path", u.http_path);
+            
             http_client = vertx.createHttpClient( new HttpClientOptions()
-                                                       .setSsl(destination_info.getBoolean("http.ssl",false))
+                                                       .setSsl(u.http_ssl)
                                                        .setTrustAll(true)
-                                                       .setDefaultPort(destination_info.getInteger("http.port",80))
-                                                       .setDefaultHost(destination_info.getString("http.host"))
+                                                       .setDefaultPort(u.http_port)
+                                                       .setDefaultHost(u.http_host)
                                                 );
 
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                  ": added destination "+this.toString());
         }
 
+        // Parse the string url into it's constituent parts for createHttpClientOptions
+        private UrlParts parse_url(String url_string) throws MalformedURLException
+        {
+            URL url = new URL(url_string);
+            
+            UrlParts u = new UrlParts();
+            
+            u.http_ssl = url.getProtocol().equals("https");
+            
+            u.http_port = url.getPort();
+            if (u.http_port < 0)
+            {
+                u.http_port = u.http_ssl ? 443 : 80;
+            }
+            
+            u.http_host = url.getHost();
+
+            u.http_path = url.getPath();
+            
+            return u;
+        }
+        
         public String toString()
         {
-            String http_token = info.getString("http.token","");
+            String http_token = info.getString("http_token","");
 
+            UrlParts u = null;
+            
+            try
+            {
+                u = parse_url(info.getString("url"));
+            }
+            catch (MalformedURLException e)
+            {
+                return "bad URL";
+            }
+            
             return destination_id+" -> "+
                    "<"+http_token+"> "+
-                   (info.getBoolean("http.ssl",false) ? "https://" : "http://")+
-                   info.getString("http.host")+":"+
-                   info.getInteger("http.port",80)+
-                   info.getString("http.uri");
+                   (u.http_ssl ? "https://" : "http://")+
+                   u.http_host +":"+
+                   u.http_port +
+                   u.http_path;
         }
 
         public void send(String msg)

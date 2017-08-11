@@ -18,6 +18,6 @@ for i in $(seq 1 10)
 do
   sensor_id="test_sensor_"$((10000 + RANDOM % 9999))$i
   destination_id=$destination_start$((1 + RANDOM % 9))
-  echo INSERT INTO csn_sensor \(info\) VALUES \(\'{ \"sensor_id\": \"$sensor_id\", \"destination_id\": \"$destination_id\", \"sensor_type\": \"$sensor_type\"}\'\)';'
+  echo INSERT INTO csn_sensor \(info\) VALUES \(\'{ \"sensor_id\": \"$sensor_id\", \"destination_id\": \"$destination_id_start$destination_id\", \"sensor_type\": \"$sensor_type\"}\'\)';'
 done
 
