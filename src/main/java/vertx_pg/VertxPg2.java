@@ -215,7 +215,7 @@ public class VertxPg2 extends AbstractVerticle {
         
         switch (method)
         {
-            case Constants.METHOD_ADD_DEVICE:
+            case Constants.METHOD_ADD_SENSOR:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                            ": received add_device manager message on "+EB_MANAGER);
                 JsonObject dev_info = msg.getJsonObject("params");
@@ -228,7 +228,7 @@ public class VertxPg2 extends AbstractVerticle {
                 add_device(dev_info);
                 break;
 
-            case Constants.METHOD_REMOVE_DEVICE:
+            case Constants.METHOD_REMOVE_SENSOR:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                            ": received remove_device manager message on "+EB_MANAGER);
                 dev_info = msg.getJsonObject("params");
@@ -241,7 +241,7 @@ public class VertxPg2 extends AbstractVerticle {
                 remove_device(dev_info);
                 break;
 
-            case Constants.METHOD_ADD_APPLICATION:
+            case Constants.METHOD_ADD_DESTINATION:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                            ": received add_application manager message on "+EB_MANAGER);
                 JsonObject app_info = msg.getJsonObject("params");
@@ -254,7 +254,7 @@ public class VertxPg2 extends AbstractVerticle {
                 add_application(app_info);
                 break;
 
-            case Constants.METHOD_REMOVE_APPLICATION:
+            case Constants.METHOD_REMOVE_DESTINATION:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                            ": received remove_application manager message on "+EB_MANAGER);
                 app_info = msg.getJsonObject("params");

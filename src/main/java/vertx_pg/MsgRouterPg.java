@@ -36,7 +36,7 @@ import java.util.HashMap;
 
 public class MsgRouterPg extends AbstractVerticle {
 
-    private final String VERSION = "0.05";
+    private final String VERSION = "0.07";
     
     // from config()
     public int LOG_LEVEL;             // optional in config(), defaults to Constants.LOG_INFO
@@ -57,9 +57,9 @@ public class MsgRouterPg extends AbstractVerticle {
     // global vars
     private HashMap<String,HttpClient> http_clients; // used to store a HttpClient for each feed_id
 
-    private HashMap<String,LoraDevice> lora_devices; // stores dev_eui -> app_eui mapping
+    private HashMap<String,Sensor> sensors; // stores sensor_id -> destination_id mapping
 
-    private HashMap<String,LoraApplication> lora_applications; // stores app_eui -> http POST mapping
+    private HashMap<String,Destination> destinations; // stores destination_id -> http POST mapping
 
     @Override
     public void start(Future<Void> fut) throws Exception {
@@ -81,16 +81,24 @@ public class MsgRouterPg extends AbstractVerticle {
         // create holder for HttpClients, one per router
         http_clients = new HashMap<String,HttpClient>();
 
-        // create holders for LoraWAN device and application data
-        lora_devices = new HashMap<String,LoraDevice>();
-        lora_applications = new HashMap<String,LoraApplication>();
+        // create holders for sensor and application data
+        sensors = new HashMap<String,Sensor>();
+        destinations = new HashMap<String,Destination>();
 
-        // 
         vertx.executeBlocking(load_fut -> {
                     load_data(load_fut);
                 },
-                res -> { logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                                  "load_data() complete, status "+res);
+                res -> { 
+                    if (res.succeeded())
+                    {
+                        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                                  " load_data() complete, status "+res.result());
+                    }
+                    else
+                    {
+                        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                                  " load_data() failed, status "+res.cause());
+                    }
                        });
 
         // iterate through all the routers to be started
@@ -100,7 +108,7 @@ public class MsgRouterPg extends AbstractVerticle {
             }
 
         // **********************************************************************************
-        // Subscribe to 'manager' messages, e.g. to add devices and applications
+        // Subscribe to 'manager' messages, e.g. to add sensors and applications
         //
         // For the message to be processed by this module, it must be sent with this module's
         // MODULE_NAME and MODULE_ID in the "to_module_name" and "to_module_id" fields. E.g.
@@ -108,9 +116,9 @@ public class MsgRouterPg extends AbstractVerticle {
         //    "msg_type":    "module_method",
         //    "to_module_name": "msgrouter",
         //    "to_module_id": "test",
-        //    "method": "add_device",
-        //    "params": { "dev_eui": "0018b2000000113e",
-        //                "app_eui": "0018b2000000abcd"
+        //    "method": "add_sensor",
+        //    "params": { "sensor_id": "0018b2000000113e",
+        //                "destination_id": "0018b2000000abcd"
         //                }
         // }
         eb.consumer(EB_MANAGER, message -> {
@@ -128,48 +136,68 @@ public class MsgRouterPg extends AbstractVerticle {
     private boolean load_data(Future<Object> fut)
     {
         JsonObject sql_client_config = new JsonObject()
-            .put("url", "jdbc:postgresql:csn")
-            .put("user", "ijl20")
-            .put("password", "foo!1")
-            .put("driver_class", "org.postgresql.Driver");
-
+              .put("url", config().getString(MODULE_NAME+".db.url"))
+              .put("user", config().getString(MODULE_NAME+".db.user"))
+              .put("password", config().getString(MODULE_NAME+".db.password"))
+              .put("driver_class", "org.postgresql.Driver");
+        
         //SQLClient sql_client = PostgreSQLClient.createShared(vertx, sql_client_config);
         JDBCClient jdbc_client = JDBCClient.createShared(vertx, sql_client_config);
 
-        logger.log(Constants.LOG_DEBUG, "VertxPg jdbc_client created.");
+        logger.log(Constants.LOG_DEBUG, "VertxPg jdbc_client created for "+sql_client_config.getString("url"));
 
         jdbc_client.getConnection(res -> {
-            if (res.failed()) {
+            if (res.failed()) 
+            {
                 logger.log(Constants.LOG_WARN, "VertxPg getConnection failed.");
                 fut.fail(res.cause());
-            } else {
+            }
+            else 
+            {
                 logger.log(Constants.LOG_DEBUG, "VertxPg getConnection succeeded.");
 
                 SQLConnection sql_connection = res.result();
 
-                String sql_query = "SELECT * FROM csn_lwdevice";
-
-                sql_connection.query( sql_query,
-                     r -> {
-                              if (r.failed()) 
+                sql_connection.query( "SELECT info FROM csn_destination",
+                     rd -> {
+                              if (rd.failed()) 
                               {
-                                  fut.fail(r.cause());
+                                  logger.log(Constants.LOG_WARN, "Failed query SELECT info FROM csn_destination");
+                                  fut.fail(rd.cause());
                                   return;
                               }
 
-                              logger.log(Constants.LOG_DEBUG, r.result().getNumRows() + " rows returned");
+                              logger.log(Constants.LOG_DEBUG, rd.result().getNumRows() + " rows returned from csn_destination");
 
-                              for (JsonObject row : r.result().getRows())
+                              for (JsonObject row : rd.result().getRows())
                               {
-                                  add_device(row);
-                                  logger.log(Constants.LOG_DEBUG, row.toString());
+                                  //logger.log(Constants.LOG_DEBUG, row.toString());
+                                  add_destination(new JsonObject(row.getString("info")));
                               }
 
-                              // close connection to database
-                              sql_connection.close(v -> {
-                                  logger.log(Constants.LOG_DEBUG, "VertxPg sql_connection closed.");
-                                  fut.complete("ok");
-                              });
+                              sql_connection.query( "SELECT info FROM csn_sensor",
+                                                    rs -> {
+                                                        if (rs.failed()) 
+                                                            {
+                                                                logger.log(Constants.LOG_WARN, "Failed query SELECT info FROM csn_sensor");
+                                                                fut.fail(rs.cause());
+                                                                return;
+                                                            }
+
+                                                        logger.log(Constants.LOG_DEBUG, rs.result().getNumRows() + " rows returned from csn_sensor");
+
+                                                        for (JsonObject row : rs.result().getRows())
+                                                            {
+                                                                //logger.log(Constants.LOG_DEBUG, row.toString());
+                                                                add_sensor(new JsonObject(row.getString("info")));
+                                                            }
+
+                                                        // close connection to database
+                                                        sql_connection.close(v -> {
+                                                                logger.log(Constants.LOG_DEBUG, MODULE_NAME+" sql_connection closed.");
+                                                                fut.complete("ok");
+                                                            });
+                                                    });
                           });
             }
         });
@@ -179,7 +207,7 @@ public class MsgRouterPg extends AbstractVerticle {
 
     // Here is where we process the 'manager' messages received for this module on the
     // config 'eb.manager' eventbus address.
-    // e.g. the 'add_device' and 'add_application' messages.
+    // e.g. the 'add_sensor' and 'add_application' messages.
     private void manager_message(Message<java.lang.Object> message)
     {
         JsonObject msg = new JsonObject(message.body().toString());
@@ -217,9 +245,9 @@ public class MsgRouterPg extends AbstractVerticle {
         
         switch (method)
         {
-            case Constants.METHOD_ADD_DEVICE:
+            case Constants.METHOD_ADD_SENSOR:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                           ": received add_device manager message on "+EB_MANAGER);
+                           ": received add_sensor manager message on "+EB_MANAGER);
                 JsonObject dev_info = msg.getJsonObject("params");
                 if (dev_info == null)
                 {
@@ -227,12 +255,12 @@ public class MsgRouterPg extends AbstractVerticle {
                                ": skipping manager message ('params' property missing) on "+EB_MANAGER);
                     return;
                 }
-                add_device(dev_info);
+                add_sensor(dev_info);
                 break;
 
-            case Constants.METHOD_REMOVE_DEVICE:
+            case Constants.METHOD_REMOVE_SENSOR:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                           ": received remove_device manager message on "+EB_MANAGER);
+                           ": received remove_sensor manager message on "+EB_MANAGER);
                 dev_info = msg.getJsonObject("params");
                 if (dev_info == null)
                 {
@@ -240,12 +268,12 @@ public class MsgRouterPg extends AbstractVerticle {
                                ": skipping manager message ('params' property missing) on "+EB_MANAGER);
                     return;
                 }
-                remove_device(dev_info);
+                remove_sensor(dev_info);
                 break;
 
-            case Constants.METHOD_ADD_APPLICATION:
+            case Constants.METHOD_ADD_DESTINATION:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                           ": received add_application manager message on "+EB_MANAGER);
+                           ": received add_destination manager message on "+EB_MANAGER);
                 JsonObject app_info = msg.getJsonObject("params");
                 if (app_info == null)
                 {
@@ -253,12 +281,12 @@ public class MsgRouterPg extends AbstractVerticle {
                                ": skipping manager message ('params' property missing) on "+EB_MANAGER);
                     return;
                 }
-                add_application(app_info);
+                add_destination(app_info);
                 break;
 
-            case Constants.METHOD_REMOVE_APPLICATION:
+            case Constants.METHOD_REMOVE_DESTINATION:
                 logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                           ": received remove_application manager message on "+EB_MANAGER);
+                           ": received remove_destination manager message on "+EB_MANAGER);
                 app_info = msg.getJsonObject("params");
                 if (app_info == null)
                 {
@@ -266,7 +294,7 @@ public class MsgRouterPg extends AbstractVerticle {
                                ": skipping manager message ('params' property missing) on "+EB_MANAGER);
                     return;
                 }
-                remove_application(app_info);
+                remove_destination(app_info);
                 break;
 
             default:
@@ -277,87 +305,87 @@ public class MsgRouterPg extends AbstractVerticle {
 
     }
 
-    // Add a LoraWAN device to lora_devices, having received an 'add_device' manager message
-    private void add_device(JsonObject params)
+    // Add a LoraWAN sensor to sensors, having received an 'add_sensor' manager message
+    private void add_sensor(JsonObject params)
     {
-        String dev_eui = params.getString("dev_eui");
-        if (dev_eui == null)
+        String sensor_id = params.getString("sensor_id");
+        if (sensor_id == null)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": skipping add_device manager message ('dev_eui' property missing) on "+EB_MANAGER);
+                       ": skipping add_sensor manager message ('sensor_id' property missing) on "+EB_MANAGER);
             return;
         }
         
-        // create a LoraDevice object for this device
-        LoraDevice device = new LoraDevice(params);
+        // create a Sensor object for this sensor
+        Sensor sensor = new Sensor(params);
 
-        // add the device to the current list (HashMap)
-        lora_devices.put(dev_eui, device);
+        // add the sensor to the current list (HashMap)
+        sensors.put(sensor_id, sensor);
 
         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": device count now "+lora_devices.size());
+                   ": sensor count now "+sensors.size());
     }
 
-    // Remove a LoraWAN device from lora_devices, having received a 'remove_device' manager message
-    private void remove_device(JsonObject params)
+    // Remove a LoraWAN sensor from sensors, having received a 'remove_sensor' manager message
+    private void remove_sensor(JsonObject params)
     {
-        String dev_eui = params.getString("dev_eui");
-        if (dev_eui == null)
+        String sensor_id = params.getString("sensor_id");
+        if (sensor_id == null)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": skipping remove_device manager message ('dev_eui' property missing) on "+EB_MANAGER);
+                       ": skipping remove_sensor manager message ('sensor_id' property missing) on "+EB_MANAGER);
             return;
         }
         
-        // remove the device from the current list (HashMap)
-        lora_devices.remove(dev_eui);
+        // remove the sensor from the current list (HashMap)
+        sensors.remove(sensor_id);
 
         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": device count now "+lora_devices.size());
+                   ": sensor count now "+sensors.size());
     }
 
-    // Add a LoraWAN application to lora_applications, having received an 'add_application' manager message
-    private void add_application(JsonObject params)
+    // Add a LoraWAN destination to destinations, having received an 'add_destination' manager message
+    private void add_destination(JsonObject params)
     {
-        String app_eui = json_property_to_string(params, "app_eui");
+        String destination_id = json_property_to_string(params, "destination_id");
 
-        if (app_eui == null)
+        if (destination_id == null)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": skipping add_application manager message ('app_eui' property missing) on "+EB_MANAGER);
+                       ": skipping add_destination manager message ('destination_id' property missing) on "+EB_MANAGER);
             return;
         }
 
-        // Create LoraApplication object for this application
-        LoraApplication application = new LoraApplication(params);
+        // Create Destination object for this destination
+        Destination destination = new Destination(params);
 
         // Add to the current list (HashMap) of objects
-        lora_applications.put(app_eui, application);
+        destinations.put(destination_id, destination);
 
         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": application count now "+lora_applications.size());
+                   ": destination count now "+destinations.size());
     }
 
-    private void remove_application(JsonObject params)
+    private void remove_destination(JsonObject params)
     {
-        String app_eui = json_property_to_string(params, "app_eui");
+        String destination_id = json_property_to_string(params, "destination_id");
 
-        if (app_eui == null)
+        if (destination_id == null)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": skipping remove_application manager message ('app_eui' property missing) on "+EB_MANAGER);
+                       ": skipping remove_destination manager message ('destination_id' property missing) on "+EB_MANAGER);
             return;
         }
 
         // Remove from the current list (HashMap) of objects
-        lora_applications.remove(app_eui);
+        destinations.remove(destination_id);
 
         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": application count now "+lora_applications.size());
+                   ": destination count now "+destinations.size());
     }
         
     // Return a String value for a JSONObject property that may be String or Integer.
-    // This is used to bridge versions of tfc_web that may use either for 'app_eui'
+    // This is used to bridge versions of tfc_web that may use either for 'destination_id'
     private String json_property_to_string(JsonObject jo, String property)
     {
         String string_value;
@@ -397,7 +425,7 @@ public class MsgRouterPg extends AbstractVerticle {
         //
         // Note: a router config() (in msgrouter.routers) MAY contain a filter, such as
         // "source_filter": { 
-        //                    "field": "dev_eui",
+        //                    "field": "sensor_id",
         //                    "compare": "=",
         //                    "value": "0018b2000000113e"
         //                   }
@@ -409,11 +437,11 @@ public class MsgRouterPg extends AbstractVerticle {
 
         //final RouterFilter source_filter = has_filter ? new RouterFilter(filter_json) : null;
 
-        final String config_app_eui = router_config.getString("app_eui");
+        final String config_destination_id = router_config.getString("destination_id");
 
-        if (config_app_eui != null)
+        if (config_destination_id != null)
         {
-            add_application(router_config);
+            add_destination(router_config);
         }
 
         //final HttpClient http_client = vertx.createHttpClient( new HttpClientOptions()
@@ -451,29 +479,29 @@ public class MsgRouterPg extends AbstractVerticle {
             {
                 // route this message if it matches the filter within the RouterConfig
                 //route_msg(http_client, router_config, msg);
-                if (config_app_eui != null)
+                if (config_destination_id != null)
                 {
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                               ": sending message via config app_eui "+config_app_eui);
+                               ": sending message via config destination_id "+config_destination_id);
                     try 
                     {
                         // Careful here!! Although FeedHandler(etc) can send an Array of data points in
                         // the "request_data" parameter, for LoraWAN purposes we are currently assuming
                         // only a single data value is going to be present, hence we are forwarding
                         // msg.getJsonArray("request_data").getJsonObject(0), not the whole array.
-                        lora_applications.get(config_app_eui).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
+                        destinations.get(config_destination_id).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
                     }
                     catch (Exception e)
                     {
                         logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                                   ": send error for "+config_app_eui);
+                                   ": send error for "+config_destination_id);
                     }
                     return;
                 }
                 else
                 {
-                    // There is no app_eui defined in the config(), so we'll try and route via
-                    // the loraWAN dev_eui -> app_eui mapping in the lora_devices HashMap
+                    // There is no destination_id defined in the config(), so we'll try and route via
+                    // the loraWAN dev_eui -> destination_id mapping in the sensors HashMap
                     String dev_eui = msg.getString("dev_eui");
                     if (dev_eui == null)
                     {
@@ -484,23 +512,23 @@ public class MsgRouterPg extends AbstractVerticle {
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                                ": using dev_eui "+dev_eui);
 
-                    String app_eui;
+                    String destination_id;
 
                     try
                     {
-                        app_eui = json_property_to_string(lora_devices.get(dev_eui).dev_info, "app_eui");
+                        destination_id = json_property_to_string(sensors.get(dev_eui).dev_info, "destination_id");
                     }
                     catch (Exception NullPointerException)
                     {
                         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                                   ": ignoring "+dev_eui+" no app_eui set");
+                                   ": ignoring "+dev_eui+" no destination_id set");
                         return;
                     }
 
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                               ": sending to app_eui "+app_eui);
+                               ": sending to destination_id "+destination_id);
 
-                    lora_applications.get(app_eui).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
+                    destinations.get(destination_id).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
                 }
             }
             else
@@ -579,40 +607,40 @@ public class MsgRouterPg extends AbstractVerticle {
         return true;
     } // end get_config()
 
-    // This class holds the LoraWAN device data
-    // received in the 'params' property of the 'add_device' eventbus method message
-    private class LoraDevice {
-        public String dev_eui;
+    // This class holds the LoraWAN sensor data
+    // received in the 'params' property of the 'add_sensor' eventbus method message
+    private class Sensor {
+        public String sensor_id;
         public JsonObject dev_info;
         // e.g. {
-        //        "dev_eui": "0018b2000000113e",
-        //        "app_eui": "0018b2000000abcd"
+        //        "sensor_id": "0018b2000000113e",
+        //        "destination_id": "0018b2000000abcd"
         //      }
 
         // Constructor
-        LoraDevice(JsonObject params)
+        Sensor(JsonObject params)
         {
-            dev_eui = params.getString("dev_eui");
+            sensor_id = params.getString("sensor_id");
             dev_info = params;
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                 ": added device "+this.toString());
+                 ": added sensor "+this.toString());
         }
 
         public String toString()
         {
-            return dev_eui + " -> " + json_property_to_string(dev_info, "app_eui");
+            return sensor_id + " -> " + json_property_to_string(dev_info, "destination_id");
         }
     }
 
-    // This class holds the LoraWAN application (i.e. http destination) data
-    // received in the 'params' property of the 'add_application' eventbus method message
-    private class LoraApplication {
-        public String app_eui;
+    // This class holds the LoraWAN destination (i.e. http destination) data
+    // received in the 'params' property of the 'add_destination' eventbus method message
+    private class Destination {
+        public String destination_id;
         public JsonObject app_info;
         public HttpClient http_client;
 
         // e.g. {
-        //        "app_eui": "0018b2000000abcd",
+        //        "destination_id": "0018b2000000abcd",
         //        "http.post": true,
         //        "http.host": "localhost",
         //        "http.port": 8098,
@@ -622,9 +650,9 @@ public class MsgRouterPg extends AbstractVerticle {
         //      }
 
         // Constructor
-        LoraApplication(JsonObject params)
+        Destination(JsonObject params)
         {
-            app_eui = json_property_to_string(params, "app_eui");
+            destination_id = json_property_to_string(params, "destination_id");
 
             app_info = params;
             http_client = vertx.createHttpClient( new HttpClientOptions()
@@ -635,14 +663,14 @@ public class MsgRouterPg extends AbstractVerticle {
                                                 );
 
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                 ": added application "+this.toString());
+                 ": added destination "+this.toString());
         }
 
         public String toString()
         {
             String http_token = app_info.getString("http.token","");
 
-            return app_eui+" -> "+
+            return destination_id+" -> "+
                    "<"+http_token+"> "+
                    (app_info.getBoolean("http.ssl",false) ? "https://" : "http://")+
                    app_info.getString("http.host")+":"+
@@ -653,7 +681,7 @@ public class MsgRouterPg extends AbstractVerticle {
         public void send(String msg)
         {
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                       ": sending to "+app_eui+": " + msg);
+                       ": sending to "+destination_id+": " + msg);
 
             String http_uri = app_info.getString("http.uri");
 
@@ -670,7 +698,7 @@ public class MsgRouterPg extends AbstractVerticle {
 
                 request.exceptionHandler( e -> {
                         logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                                   ": LoraApplication HttpClientRequest error for "+app_eui);
+                                   ": Destination HttpClientRequest error for "+destination_id);
                         });
 
                 // Now do stuff with the request
@@ -688,11 +716,11 @@ public class MsgRouterPg extends AbstractVerticle {
             catch (Exception e)
             {
                 logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                           ": LoraApplication send error for "+app_eui);
+                           ": Destination send error for "+destination_id);
             }
         }
             
-    } // end class LoraApplication
+    } // end class Destination
 
 
 } // end class MsgRouter
