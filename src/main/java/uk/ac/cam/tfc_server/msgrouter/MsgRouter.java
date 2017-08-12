@@ -150,17 +150,20 @@ public class MsgRouter extends AbstractVerticle {
         //SQLClient sql_client = PostgreSQLClient.createShared(vertx, sql_client_config);
         JDBCClient jdbc_client = JDBCClient.createShared(vertx, sql_client_config);
 
-        logger.log(Constants.LOG_DEBUG, "VertxPg jdbc_client created for "+sql_client_config.getString("url"));
+        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                   ": VertxPg jdbc_client created for "+sql_client_config.getString("url"));
 
         jdbc_client.getConnection(res -> {
             if (res.failed()) 
             {
-                logger.log(Constants.LOG_WARN, "VertxPg getConnection failed.");
+                logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
+                            ": VertxPg getConnection failed.");
                 fut.fail(res.cause());
             }
             else 
             {
-                logger.log(Constants.LOG_DEBUG, "VertxPg getConnection succeeded.");
+                logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                           ": VertxPg getConnection succeeded.");
 
                 SQLConnection sql_connection = res.result();
 
@@ -168,12 +171,14 @@ public class MsgRouter extends AbstractVerticle {
                      rd -> {
                               if (rd.failed()) 
                               {
-                                  logger.log(Constants.LOG_WARN, "Failed query SELECT info FROM csn_destination");
+                                  logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
+                                               ": Failed query SELECT info FROM csn_destination");
                                   fut.fail(rd.cause());
                                   return;
                               }
 
-                              logger.log(Constants.LOG_DEBUG, rd.result().getNumRows() + " rows returned from csn_destination");
+                              logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                                         ": "+rd.result().getNumRows() + " rows returned from csn_destination");
 
                               for (JsonObject row : rd.result().getRows())
                               {
@@ -181,16 +186,22 @@ public class MsgRouter extends AbstractVerticle {
                                   add_destination(new JsonObject(row.getString("info")));
                               }
 
+
+                              logger.log(Constants.LOG_DEBUG, MODULE_NAME+
+                                         ": "+destinations.size()+" destinations loaded.");
+
                               sql_connection.query( "SELECT info FROM csn_sensor",
                                                     rs -> {
                                                         if (rs.failed()) 
                                                             {
-                                                                logger.log(Constants.LOG_WARN, "Failed query SELECT info FROM csn_sensor");
+                                                                logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
+                                                                            ": Failed query SELECT info FROM csn_sensor");
                                                                 fut.fail(rs.cause());
                                                                 return;
                                                             }
 
-                                                        logger.log(Constants.LOG_DEBUG, rs.result().getNumRows() + " rows returned from csn_sensor");
+                                                        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                                                                   ": "+rs.result().getNumRows() + " rows returned from csn_sensor");
 
                                                         for (JsonObject row : rs.result().getRows())
                                                             {
@@ -198,9 +209,13 @@ public class MsgRouter extends AbstractVerticle {
                                                                 add_sensor(new JsonObject(row.getString("info")));
                                                             }
 
+                                                        logger.log(Constants.LOG_DEBUG, MODULE_NAME+
+                                                                           ": "+sensors.size()+" sensors loaded.");
+
                                                         // close connection to database
                                                         sql_connection.close(v -> {
-                                                                logger.log(Constants.LOG_DEBUG, MODULE_NAME+" sql_connection closed.");
+                                                                logger.log(Constants.LOG_DEBUG, MODULE_NAME+
+                                                                           ": sql_connection closed.");
                                                                 fut.complete("ok");
                                                             });
                                                     });
@@ -328,8 +343,8 @@ public class MsgRouter extends AbstractVerticle {
         // add the sensor to the current list (HashMap)
         sensors.put(sensor_id, sensor);
 
-        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": sensor count now "+sensors.size());
+        // logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+        //           ": sensor count now "+sensors.size());
     }
 
     // Remove a LoraWAN sensor from sensors, having received a 'remove_sensor' manager message
@@ -377,8 +392,8 @@ public class MsgRouter extends AbstractVerticle {
             return;
         }
         
-        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": destination count now "+destinations.size());
+        //logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+        //           ": destination count now "+destinations.size());
     }
 
     private void remove_destination(JsonObject destination_info)
@@ -637,8 +652,8 @@ public class MsgRouter extends AbstractVerticle {
         {
             sensor_id = sensor_info.getString("sensor_id");
             info = sensor_info;
-            logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                 ": added sensor "+this.toString());
+            //logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+            //     ": added sensor "+this.toString());
         }
 
         public String toString()
