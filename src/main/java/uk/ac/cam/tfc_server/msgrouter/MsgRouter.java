@@ -329,19 +329,20 @@ public class MsgRouter extends AbstractVerticle {
     // Add a sensor to sensors, having received an 'add_sensor' manager message
     private void add_sensor(JsonObject sensor_info)
     {
-        String sensor_id = sensor_info.getString("sensor_id");
-        if (sensor_id == null)
+        Sensor sensor;
+        try
+        {
+            // Create a Sensor object for this sensor
+            sensor = new Sensor(sensor_info);
+        }
+        catch (MsgRouterException e)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": skipping add_sensor manager message ('sensor_id' property missing) on "+EB_MANAGER);
+                       ": eventbus add_sensor failed with "+e.getMessage());
             return;
         }
-        
-        // create a Sensor object for this sensor
-        Sensor sensor = new Sensor(sensor_info);
-
         // add the sensor to the current list (HashMap)
-        sensors.put(sensor_id, sensor);
+        sensors.put(sensor.sensor_type+"/"+sensor.sensor_id, sensor);
 
         // logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
         //           ": sensor count now "+sensors.size());
@@ -351,85 +352,65 @@ public class MsgRouter extends AbstractVerticle {
     private void remove_sensor(JsonObject sensor_info)
     {
         String sensor_id = sensor_info.getString("sensor_id");
-        if (sensor_id == null)
+        String sensor_type = sensor_info.getString("sensor_type");
+        if (sensor_id == null || sensor_type == null)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": skipping remove_sensor manager message ('sensor_id' property missing) on "+EB_MANAGER);
+                       ": skipping remove_sensor manager message ('sensor_id' or 'sensor_type' property missing) on "+EB_MANAGER);
             return;
         }
         
         // remove the sensor from the current list (HashMap)
-        sensors.remove(sensor_id);
+        sensors.remove(sensor_type+"/"+sensor_id);
 
         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": sensor count now "+sensors.size());
+                   ": remove_sensor, count now "+sensors.size());
     }
 
     // Add a destination (destination_id, http.token, url) to destinations, having received an 'add_destination' manager message
-    private void add_destination(JsonObject destination_info)
+    private boolean add_destination(JsonObject destination_info)
     {
-        String destination_id = json_property_to_string(destination_info, "destination_id");
-
-        if (destination_id == null)
-        {
-            logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": skipping add_destination manager message ('destination_id' property missing) on "+EB_MANAGER);
-            return;
-        }
-
+        Destination destination;
         try
         {
             // Create Destination object for this destination
-            Destination destination = new Destination(destination_info);
+            destination = new Destination(destination_info);
 
-            // Add to the current list (HashMap) of objects
-            destinations.put(destination_id, destination);
         }
-        catch (MalformedURLException e)
+        catch (MsgRouterException e)
         {
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": Bad URL for destination "+destination_id);
-            return;
+                   ": eventbus add_destination failed with "+e.getMessage());
+            return false;
         }
         
+        //debug! Will redo this key construct.
+        //Add to the current list (HashMap) of objects
+        destinations.put(destination.destination_type+"/"+destination.destination_id, destination);
         //logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
         //           ": destination count now "+destinations.size());
+        return true;
     }
 
     private void remove_destination(JsonObject destination_info)
     {
-        String destination_id = json_property_to_string(destination_info, "destination_id");
+        String destination_id = destination_info.getString("destination_id");
+        String destination_type = destination_info.getString("destination_type");
 
-        if (destination_id == null)
+        if (destination_id == null || destination_type == null)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": skipping remove_destination manager message ('destination_id' property missing) on "+EB_MANAGER);
+                       ": skipping remove_destination manager message ('destination_id' or 'destination_type' property missing) on "+EB_MANAGER);
             return;
         }
 
         // Remove from the current list (HashMap) of objects
-        destinations.remove(destination_id);
+        destinations.remove(destination_type+"/"+destination_id);
 
         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": destination count now "+destinations.size());
+                   ": remove_destination count now "+destinations.size());
     }
         
-    // Return a String value for a JSONObject property that may be String or Integer.
-    // This is used to bridge versions of tfc_web that may use either for 'destination_id'
-    private String json_property_to_string(JsonObject jo, String property)
-    {
-        String string_value;
-        try
-        {
-            string_value = jo.getString(property);
-        }
-        catch (java.lang.ClassCastException e)
-        {
-            string_value = jo.getInteger(property).toString();
-        }
-        return string_value;
-    }
-
     // send UP status to the EventBus
     private void send_status()
     {
@@ -454,11 +435,19 @@ public class MsgRouter extends AbstractVerticle {
         // which is the EventBus address it will listen to for messages to be forwarded.
         //
         // Note: a router config() (in msgrouter.routers) MAY contain a filter, such as
-        // "source_filter": { 
-        //                    "field": "sensor_id",
-        //                    "compare": "=",
-        //                    "value": "0018b2000000113e"
-        //                   }
+        //        { 
+        //            "source_address": "tfc.everynet_feed.test",
+        //            "source_filter": { 
+        //                                 "field": "dev_eui",
+        //                                 "compare": "=",
+        //                                 "value": "0018b2000000113e"
+        //                             },
+        //            "destination_id":    "test",
+        //            "destination_type":  "everynet_jsonrpc",              
+        //            "url" :  "http://localhost:8080/everynet_feed/test/adeunis_test2",
+        //            "http_token": "test-msgrouter-post"
+        //        },
+        //
         // in which case only messages on the source_address that match this pattern will
         // be processed.
 
@@ -467,12 +456,8 @@ public class MsgRouter extends AbstractVerticle {
 
         //final RouterFilter source_filter = has_filter ? new RouterFilter(filter_json) : null;
 
-        final String config_destination_id = router_config.getString("destination_id");
-
-        if (config_destination_id != null)
-        {
-            add_destination(router_config);
-        }
+        final String destination_key = router_config.getString("destination_type")+"/"+router_config.getString("destination_id"); 
+        boolean has_destination = add_destination(router_config);
 
         //final HttpClient http_client = vertx.createHttpClient( new HttpClientOptions()
         //                                               .setSsl(router_config.getBoolean("http.ssl"))
@@ -509,56 +494,65 @@ public class MsgRouter extends AbstractVerticle {
             {
                 // route this message if it matches the filter within the RouterConfig
                 //route_msg(http_client, router_config, msg);
-                if (config_destination_id != null)
+                if (has_destination)
                 {
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                               ": sending message via config destination_id "+config_destination_id);
+                               ": sending message to "+destination_key);
                     try 
                     {
                         // Careful here!! Although FeedHandler(etc) can send an Array of data points in
                         // the "request_data" parameter, for LoraWAN purposes we are currently assuming
                         // only a single data value is going to be present, hence we are forwarding
                         // msg.getJsonArray("request_data").getJsonObject(0), not the whole array.
-                        destinations.get(config_destination_id).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
+                        destinations.get(destination_key).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
                     }
                     catch (Exception e)
                     {
                         logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                                   ": send error for "+config_destination_id);
+                                   ": send error for "+destination_key);
                     }
                     return;
                 }
                 else
                 {
-                    // There is no destination_id defined in the config(), so we'll try and route via
-                    // the sensor_id -> destination_id mapping in the sensors HashMap
-                    String dev_eui = msg.getString("dev_eui");
-                    if (dev_eui == null)
+                    // There is no destination_type/id defined in the config(), so we'll try and route via
+                    // the sensor_type/id -> destination_id mapping in the sensors HashMap
+                    String sensor_id = msg.getString("dev_eui");
+                    //debug! We will need to put this sensor type into a Constant
+                    String sensor_type = "lorawan";
+                    if (sensor_id == null)
                     {
                         logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
                                    ": skipping message (no dev_eui) ");
                         return;
                     }
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                               ": using dev_eui "+dev_eui);
+                               ": using dev_eui "+sensor_id);
 
+                    //debug! Need to re-do this key construction
                     String destination_id;
+                    String destination_type;
 
                     try
                     {
-                        destination_id = json_property_to_string(sensors.get(dev_eui).info, "destination_id");
+                        //debug! this construction of the HashMap key needs re-doing
+                        String sensor_key = sensor_type+"/"+sensor_id;
+                        destination_id = (sensors.get(sensor_key).info).getString("destination_id");
+                        destination_type = (sensors.get(sensor_key).info).getString("destination_type");
                     }
                     catch (Exception NullPointerException)
                     {
                         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                                   ": ignoring "+dev_eui+" no destination_id set");
+                                   ": ignoring "+sensor_id+" no destination_id / destination_type set");
                         return;
                     }
 
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                               ": sending to destination_id "+destination_id);
+                               ": sending to destination "+destination_key);
 
-                    destinations.get(destination_id).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
+                    //debug! Redo this key
+                    destinations.get(destination_type+"/"+destination_id)
+                        .send(msg.getJsonArray("request_data").getJsonObject(0).toString());
                 }
             }
             else
@@ -641,16 +635,27 @@ public class MsgRouter extends AbstractVerticle {
     // received in the 'params' property of the 'add_sensor' eventbus method message
     private class Sensor {
         public String sensor_id;
+        public String sensor_type;
         public JsonObject info;
         // e.g. {
         //        "sensor_id": "0018b2000000113e",
-        //        "destination_id": "0018b2000000abcd"
+        //        "sensor_type": "lorawan",
+        //        "destination_id": "0018b2000000abcd",
+        //        "destination_type": "everynet_jsonrpc"
         //      }
 
         // Constructor
-        Sensor(JsonObject sensor_info)
+        Sensor(JsonObject sensor_info) throws MsgRouterException
         {
             sensor_id = sensor_info.getString("sensor_id");
+            sensor_type = sensor_info.getString("sensor_type");
+            String destination_id = sensor_info.getString("sensor_id");
+            String destination_type = sensor_info.getString("sensor_type");
+            if (sensor_id == null || sensor_type == null || destination_id == null || destination_type == null)
+            {
+                throw new MsgRouterException("missing key on sensor create");
+            }
+
             info = sensor_info;
             //logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
             //     ": added sensor "+this.toString());
@@ -658,7 +663,8 @@ public class MsgRouter extends AbstractVerticle {
 
         public String toString()
         {
-            return sensor_id + " -> " + json_property_to_string(info, "destination_id");
+            return sensor_type+"/"+sensor_id + " -> " +
+                info.getString("destination_type")+"/"+info.getString("destination_id");
         }
     }
 
@@ -666,6 +672,7 @@ public class MsgRouter extends AbstractVerticle {
     // received in the 'params' property of the 'add_destination' eventbus method message
     private class Destination {
         public String destination_id;
+        public String destination_type;
         public JsonObject info;
         public HttpClient http_client;
 
@@ -685,19 +692,32 @@ public class MsgRouter extends AbstractVerticle {
         // Here is where we create a new Destination on receipt of a "add_destination" message or
         // loading rows from database table csn_destinations
         //
-        Destination(JsonObject destination_info) throws MalformedURLException
+        Destination(JsonObject destination_info) throws MsgRouterException
         {
+            UrlParts u;
             // destination_id is the definitive key
             // Will be used as lookup in "destinations" HashMap
-            destination_id = json_property_to_string(destination_info, "destination_id");
+            destination_id = destination_info.getString("destination_id");
+            destination_type = destination_info.getString("destination_type");
 
-            // And store entire Json payload into "info"
-            info = destination_info;
+            if (destination_id == null || destination_type == null)
+            {
+                throw new MsgRouterException("missing key on destination create");
+            }
             
-            // The user originally gave a URL, which could be malformed, if so this will throw an
-            // exception
-            UrlParts u = parse_url(destination_info.getString("url"));
+            try
+            {
+                // The user originally gave a URL, which could be malformed, if so this will throw an
+                // exception
+                u = parse_url(destination_info.getString("url"));
+            }
+            catch (MalformedURLException e)
+            {
+                throw new MsgRouterException("bad URL on destination create");
+            }
 
+            // Store entire Json payload into "info"
+            info = destination_info;
             // inject http_path into the destination "info"
             info.put("http_path", u.http_path);
             
@@ -709,7 +729,7 @@ public class MsgRouter extends AbstractVerticle {
                                                 );
 
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                 ": added destination "+this.toString());
+                 ": created destination "+this.toString());
         }
 
         // Parse the string url into it's constituent parts for createHttpClientOptions
@@ -749,7 +769,7 @@ public class MsgRouter extends AbstractVerticle {
                 return "bad URL";
             }
             
-            return destination_id+" -> "+
+            return destination_type+"/"+destination_id+" -> "+
                    "<"+http_token+"> "+
                    (u.http_ssl ? "https://" : "http://")+
                    u.http_host +":"+
@@ -760,7 +780,7 @@ public class MsgRouter extends AbstractVerticle {
         public void send(String msg)
         {
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                       ": sending to "+destination_id+": " + msg);
+                       ": sending to "+destination_type+"/"+destination_id+": " + msg);
 
             String http_uri = info.getString("http.uri");
 
@@ -795,12 +815,23 @@ public class MsgRouter extends AbstractVerticle {
             catch (Exception e)
             {
                 logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                           ": Destination send error for "+destination_id);
+                           ": Destination send error for "+destination_type+"/"+destination_id);
             }
         }
             
     } // end class Destination
 
+    // Exception thrown if MsgRouter fails to add a sensor or a destination
+    class MsgRouterException extends Exception
+    {
+        public MsgRouterException()
+        {
+        }
 
+        public MsgRouterException(String message)
+        {
+            super(message);
+        }
+    }
 } // end class MsgRouter
 

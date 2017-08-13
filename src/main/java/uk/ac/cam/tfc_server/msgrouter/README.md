@@ -33,7 +33,7 @@ defined destination addresses.
             [
                 { 
                     "source_address": "tfc.everynet_feed.test",
-                    "source_type":    "general",
+                    "source_type":    "lorawan",
                     "source_field":   "request_data",
                     "source_index":   0,
                     "source_filter": { 
@@ -42,6 +42,7 @@ defined destination addresses.
                                          "value": "0018b2000000113e"
                                      },
                     "destination_id": "test_0018b2000000113e",
+                    "destination_type": "everynet_jsonrpc",
                     "http_token": "test-msgrouter-post",
                     "url":         "http://localhost:8098/everynet_feed/test/adeunis_test2"
                 },
