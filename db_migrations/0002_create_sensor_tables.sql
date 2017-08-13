@@ -20,10 +20,11 @@ CREATE TABLE "csn_sensor"
     "info" jsonb NOT NULL
 );
 --
-CREATE INDEX "idx_csn_sensor_info_sensor_id" ON "csn_sensor" USING BTREE ((info->>'sensor_id'));
-CREATE INDEX "idx_csn_sensor_info_sensor_type" ON "csn_sensor" USING BTREE ((info->>'sensor_type'));
-CREATE UNIQUE INDEX "idx_csn_sensor_info_sensor_id_and_type" ON "csn_sensor" ((info->>'sensor_id'),(info->>'sensor_type'));
-CREATE INDEX "idx_csn_sensor_info_destination_id" ON "csn_sensor" USING BTREE ((info->>'destination_id'));
+CREATE        INDEX "idx_csn_sensor_info_sensor_type"             ON "csn_sensor" USING BTREE ((info->>'sensor_type'));
+CREATE UNIQUE INDEX "idx_csn_sensor_info_sensor_id_and_type"      ON "csn_sensor" ((info->>'sensor_id'),(info->>'sensor_type'));
+CREATE        INDEX "idx_csn_sensor_info_destination_id"          ON "csn_sensor" USING BTREE ((info->>'destination_id'));
+CREATE        INDEX "idx_csn_sensor_info_destination_type"        ON "csn_sensor" USING BTREE ((info->>'destination_type'));
+CREATE        INDEX "idx_csn_sensor_info_user_id"                 ON "csn_sensor" USING BTREE ((info->>'user_id'));
 --
 COMMIT;
 --
@@ -35,8 +36,9 @@ CREATE TABLE "csn_destination"
     "info" jsonb NOT NULL
 );
 --
-CREATE INDEX "idx_csn_destination_info_destination_id" ON "csn_destination" USING BTREE ((info->>'destination_id'));
-CREATE INDEX "idx_csn_destination_info_user_id" ON "csn_destination" USING BTREE ((info->>'user_id'));
+CREATE        INDEX "idx_csn_destination_info_destination_type"        ON "csn_destination" USING BTREE ((info->>'destination_type'));
+CREATE UNIQUE INDEX "idx_csn_destination_info_destination_id_and_type" ON "csn_destination" ((info->>'destination_id'),(info->>'destination_type'));
+CREATE        INDEX "idx_csn_destination_info_user_id"                 ON "csn_destination" USING BTREE ((info->>'user_id'));
 --
 COMMIT;
 
