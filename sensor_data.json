@@ -1,0 +1,49 @@
+{ 
+  "module_name":"everynet_feed",
+  "module_id":"A",
+  "msg_type":"feed_everynet_temperature",
+  "feed_id":"test",
+  "filename":"1494520946_2017-05-11-17-42-26",
+  "filepath":"2017/05/11",
+  "ts":1494520946,
+  "decoded_payload":"hello world",
+  "sensor_type": "lorawan",
+  "sensor_id":"abc",
+  "request_data":
+    [
+      { 
+        "method":"uplink",
+        "params": 
+          {  
+            "dev_eui":"abc",
+            "payload":"jhgCAg8L",
+            "port":1,
+            "dev_addr":"17bee4cb",
+            "radio":
+              { 
+                "stat":1,
+                "gw_band":"EU863-870",
+                "server_time":1.494520946488835E9,
+                "modu":"LORA",
+                "gw_gps":{"lat":52.21099,"alt":32,"lon":0.09193},
+                "gw_addr":"70b3d54b138e0000",
+                "chan":6,
+                "gateway_time":1.494520946439745E9,
+                "datr":"SF12BW125",
+                "tmst":4227746172,
+                "codr":"4/5",
+                "rfch":1,
+                "lsnr":11.5,
+                "rssi":-73,
+                "freq":868.5,
+                "size":19
+              },
+            "counter_up":3,
+            "rx_time":1.494520946439745E9,
+            "encrypted_payload":"jrgQlNVX"
+          },
+        "jsonrpc":"2.0",
+        "id":"8b99e613e813"
+      }
+    ]
+}

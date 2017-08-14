@@ -1,0 +1,7 @@
+{
+  "method":"remove_destination",
+  "params":{ "info": { "destination_id": "xyz",
+                       "destination_type": "everynet_jsonrpc"
+                     }
+           }
+}

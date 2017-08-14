@@ -62,9 +62,9 @@ public class MsgRouter extends AbstractVerticle {
     // global vars
     private HashMap<String,HttpClient> http_clients; // used to store a HttpClient for each feed_id
 
-    private HashMap<String,Sensor> sensors; // stores sensor_id -> destination_id mapping
+    private HashMap<String,HashMap<String,Sensor>> sensors; // stores sensor_type-> sensor_id -> destination_type/id mapping
 
-    private HashMap<String,Destination> destinations; // stores destination_id -> http POST mapping
+    private HashMap<String,HashMap<String,Destination>> destinations; // stores destination_type->destination_id -> http POST mapping
 
     @Override
     public void start(Future<Void> fut) throws Exception {
@@ -87,8 +87,8 @@ public class MsgRouter extends AbstractVerticle {
         http_clients = new HashMap<String,HttpClient>();
 
         // create holders for sensor and application data
-        sensors = new HashMap<String,Sensor>();
-        destinations = new HashMap<String,Destination>();
+        sensors = new HashMap<String,HashMap<String,Sensor>>();
+        destinations = new HashMap<String,HashMap<String,Destination>>();
 
         vertx.executeBlocking(load_fut -> {
                     load_data(load_fut);
@@ -117,16 +117,21 @@ public class MsgRouter extends AbstractVerticle {
         //
         // For the message to be processed by this module, it must be sent with this module's
         // MODULE_NAME and MODULE_ID in the "to_module_name" and "to_module_id" fields. E.g.
-        // {
-        //    "msg_type":    "module_method",
-        //    "to_module_name": "msgrouter",
-        //    "to_module_id": "test",
-        //    "method": "add_sensor",
-        //    "params": { "info": { "sensor_id": "0018b2000000113e",
-        //                          "destination_id": "0018b2000000abcd"
-        //                        }
-        //              }
-        // }
+        //{       "module_name":"httpmsg",
+        //        "module_id":"test"
+        //        "to_module_name":"msgrouter",
+        //        "to_module_id":"test",
+        //        "method":"add_sensor",
+        //        "params":{ "info": { "sensor_id": "abc",
+        //                "sensor_type": "lorawan",
+        //                "destination_id": "xyz",
+        //                "destination_type": "everynet_jsonrpc"
+        //                }
+        //    }
+        //}
+        logger.log(Constants.LOG_INFO, MODULE_NAME+"."+MODULE_ID+
+                   ": starting listener for manager messages on "+EB_MANAGER);
+
         eb.consumer(EB_MANAGER, message -> {
                 manager_message(message);
             });
@@ -180,15 +185,17 @@ public class MsgRouter extends AbstractVerticle {
                               logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                                          ": "+rd.result().getNumRows() + " rows returned from csn_destination");
 
+                              int destination_count = 0;
                               for (JsonObject row : rd.result().getRows())
                               {
                                   //logger.log(Constants.LOG_DEBUG, row.toString());
                                   add_destination(new JsonObject(row.getString("info")));
+                                  destination_count++;
                               }
 
 
                               logger.log(Constants.LOG_DEBUG, MODULE_NAME+
-                                         ": "+destinations.size()+" destinations loaded.");
+                                         ": "+destination_count+" destinations loaded, "+destinations.size()+" type(s)");
 
                               sql_connection.query( "SELECT info FROM csn_sensor",
                                                     rs -> {
@@ -203,14 +210,18 @@ public class MsgRouter extends AbstractVerticle {
                                                         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                                                                    ": "+rs.result().getNumRows() + " rows returned from csn_sensor");
 
+                                                        // Accumulate count of sensors as they're added
+                                                        int sensor_count = 0;
+
                                                         for (JsonObject row : rs.result().getRows())
                                                             {
                                                                 //logger.log(Constants.LOG_DEBUG, row.toString());
                                                                 add_sensor(new JsonObject(row.getString("info")));
+                                                                sensor_count++;
                                                             }
 
                                                         logger.log(Constants.LOG_DEBUG, MODULE_NAME+
-                                                                           ": "+sensors.size()+" sensors loaded.");
+                                                                           ": "+sensor_count+" sensors loaded, "+sensors.size()+" type(s)");
 
                                                         // close connection to database
                                                         sql_connection.close(v -> {
@@ -232,6 +243,11 @@ public class MsgRouter extends AbstractVerticle {
     private void manager_message(Message<java.lang.Object> message)
     {
         JsonObject msg = new JsonObject(message.body().toString());
+
+        // For debug purposes, display any manage message on console.
+        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                   ": detected manager message ");
+        logger.log(Constants.LOG_DEBUG, msg.toString());
 
         // decode who this 'manager' message was sent to
         String to_module_name = msg.getString("to_module_name");
@@ -330,6 +346,7 @@ public class MsgRouter extends AbstractVerticle {
     private void add_sensor(JsonObject sensor_info)
     {
         Sensor sensor;
+        // Try creating a new Sensor from sensor_info
         try
         {
             // Create a Sensor object for this sensor
@@ -338,11 +355,27 @@ public class MsgRouter extends AbstractVerticle {
         catch (MsgRouterException e)
         {
             logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                       ": eventbus add_sensor failed with "+e.getMessage());
+                       ": add_sensor failed with "+e.getMessage());
             return;
         }
+
+        // ***********************************************
         // add the sensor to the current list (HashMap)
-        sensors.put(sensor.sensor_type+"/"+sensor.sensor_id, sensor);
+        // ***********************************************
+
+        // If this sensor is the first of its type, create a new HashMap for that type
+        HashMap<String,Sensor> type_sensors = sensors.get(sensor.sensor_type);
+        if (type_sensors == null)
+        {
+            type_sensors = new HashMap<String, Sensor>();
+            // add new sensors hashmap to global sensors hashmap
+            sensors.put(sensor.sensor_type, type_sensors);
+            logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                       ": added new sensor_type \""+sensor.sensor_type+"\" to sensors in-memory store");
+        }
+        
+        // Now we can add this sensor to the appropriate type_sensors HashMap in the sensors HashMap
+        type_sensors.put(sensor.sensor_id, sensor);
 
         // logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
         //           ": sensor count now "+sensors.size());
@@ -360,8 +393,13 @@ public class MsgRouter extends AbstractVerticle {
             return;
         }
         
-        // remove the sensor from the current list (HashMap)
-        sensors.remove(sensor_type+"/"+sensor_id);
+        // remove the sensor from the current list (HashMap) - ignore if it is missing
+        try
+        {
+            sensors.get(sensor_type).remove(sensor_id);
+        }
+        catch (Exception NullPointerException)
+        {;}
 
         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
                    ": remove_sensor, count now "+sensors.size());
@@ -380,15 +418,30 @@ public class MsgRouter extends AbstractVerticle {
         catch (MsgRouterException e)
         {
             logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": eventbus add_destination failed with "+e.getMessage());
+                   ": add_destination failed with "+e.getMessage());
             return false;
         }
         
-        //debug! Will redo this key construct.
-        //Add to the current list (HashMap) of objects
-        destinations.put(destination.destination_type+"/"+destination.destination_id, destination);
-        //logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-        //           ": destination count now "+destinations.size());
+        // ***********************************************
+        // add the destination to the current list (HashMap)
+        // ***********************************************
+
+        // If this destination is the first of its type, create a new HashMap for that type
+        HashMap<String,Destination> type_destinations = destinations.get(destination.destination_type);
+        if (type_destinations == null)
+        {
+            type_destinations = new HashMap<String, Destination>();
+            // add new destinations hashmap to global destinations hashmap
+            destinations.put(destination.destination_type, type_destinations);
+            logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                       ": added new destination_type \""+destination.destination_type+"\" to destinations in-memory store");
+        }
+        
+        // Now we can add this destination to the appropriate type_destinations HashMap in the destinations HashMap
+        type_destinations.put(destination.destination_id, destination);
+
+        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                   ": added destination "+destination.toString());
         return true;
     }
 
@@ -404,11 +457,16 @@ public class MsgRouter extends AbstractVerticle {
             return;
         }
 
-        // Remove from the current list (HashMap) of objects
-        destinations.remove(destination_type+"/"+destination_id);
+        // Remove from the current list (HashMap) of objects - ignore if it is missing
+        try
+        {
+            destinations.get(destination_type).remove(destination_id);
+        }
+        catch (Exception NullPointerException)
+        {;}
 
-        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                   ": remove_destination count now "+destinations.size());
+        //logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+        //           ": remove_destination count now "+destinations.size());
     }
         
     // send UP status to the EventBus
@@ -456,7 +514,6 @@ public class MsgRouter extends AbstractVerticle {
 
         //final RouterFilter source_filter = has_filter ? new RouterFilter(filter_json) : null;
 
-        final String destination_key = router_config.getString("destination_type")+"/"+router_config.getString("destination_id"); 
         boolean has_destination = add_destination(router_config);
 
         //final HttpClient http_client = vertx.createHttpClient( new HttpClientOptions()
@@ -496,20 +553,22 @@ public class MsgRouter extends AbstractVerticle {
                 //route_msg(http_client, router_config, msg);
                 if (has_destination)
                 {
+                    String destination_type = router_config.getString("destination_type");
+                    String destination_id = router_config.getString("destination_id"); 
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                               ": sending message to "+destination_key);
+                               ": sending message to "+destination_type+"/"+destination_id);
                     try 
                     {
                         // Careful here!! Although FeedHandler(etc) can send an Array of data points in
                         // the "request_data" parameter, for LoraWAN purposes we are currently assuming
                         // only a single data value is going to be present, hence we are forwarding
                         // msg.getJsonArray("request_data").getJsonObject(0), not the whole array.
-                        destinations.get(destination_key).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
+                        destinations.get(destination_type).get(destination_id).send(msg.getJsonArray("request_data").getJsonObject(0).toString());
                     }
                     catch (Exception e)
                     {
                         logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                                   ": send error for "+destination_key);
+                                   ": send error for "+destination_type+"/"+destination_id);
                     }
                     return;
                 }
@@ -517,42 +576,49 @@ public class MsgRouter extends AbstractVerticle {
                 {
                     // There is no destination_type/id defined in the config(), so we'll try and route via
                     // the sensor_type/id -> destination_id mapping in the sensors HashMap
-                    String sensor_id = msg.getString("dev_eui");
+                    String sensor_id = msg.getString("sensor_id");
                     //debug! We will need to put this sensor type into a Constant
-                    String sensor_type = "lorawan";
-                    if (sensor_id == null)
+                    String sensor_type = msg.getString("sensor_type");
+                    if (sensor_id == null || sensor_type == null)
                     {
                         logger.log(Constants.LOG_WARN, MODULE_NAME+"."+MODULE_ID+
-                                   ": skipping message (no dev_eui) ");
+                                   ": skipping message (no sensor_id or sensor_type) ");
                         return;
                     }
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                               ": using dev_eui "+sensor_id);
+                               ": handling sensor data from "+sensor_type+"/"+sensor_id);
 
                     //debug! Need to re-do this key construction
-                    String destination_id;
-                    String destination_type;
+                    String destination_id = null;
+                    String destination_type = null;
 
                     try
                     {
-                        //debug! this construction of the HashMap key needs re-doing
-                        String sensor_key = sensor_type+"/"+sensor_id;
-                        destination_id = (sensors.get(sensor_key).info).getString("destination_id");
-                        destination_type = (sensors.get(sensor_key).info).getString("destination_type");
+                        // Here we pick out the 
+                        destination_id = (sensors.get(sensor_type).get(sensor_id).info).getString("destination_id");
+                        destination_type = (sensors.get(sensor_type).get(sensor_id).info).getString("destination_type");
                     }
                     catch (Exception NullPointerException)
                     {
                         logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                                   ": ignoring "+sensor_id+" no destination_id / destination_type set");
+                                   ": ignoring sensor data from"+sensor_type+"/"+sensor_id+" no entry in in-memory cache");
                         return;
                     }
 
                     logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                               ": sending to destination "+destination_key);
+                               ": sending "+sensor_type+"/"+sensor_id+" to "+destination_type+"/"+destination_id);
 
-                    //debug! Redo this key
-                    destinations.get(destination_type+"/"+destination_id)
-                        .send(msg.getJsonArray("request_data").getJsonObject(0).toString());
+                    try
+                    {
+                        destinations.get(destination_type).get(destination_id)
+                            .send(msg.getJsonArray("request_data").getJsonObject(0).toString());
+                    }
+                    catch (Exception NullPointerException)
+                    {
+                        logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+                                   ": ignoring sensor data from "+sensor_type+"/"+sensor_id+" invalid destination in in-memory cache");
+                        return;
+                    }
                 }
             }
             else
@@ -728,8 +794,8 @@ public class MsgRouter extends AbstractVerticle {
                                                        .setDefaultHost(u.http_host)
                                                 );
 
-            logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
-                 ": created destination "+this.toString());
+            //logger.log(Constants.LOG_DEBUG, MODULE_NAME+"."+MODULE_ID+
+            //     ": created destination "+this.toString());
         }
 
         // Parse the string url into it's constituent parts for createHttpClientOptions

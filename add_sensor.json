@@ -1,0 +1,9 @@
+{
+  "method":"add_sensor",
+  "params":{ "info": { "sensor_id": "abc",
+                       "sensor_type": "lorawan",
+                       "destination_id": "xyz",
+                       "destination_type": "everynet_jsonrpc"
+                     }
+           }
+}

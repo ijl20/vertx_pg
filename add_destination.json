@@ -1,0 +1,9 @@
+{
+  "method":"add_destination",
+  "params":{ "info": { "destination_id": "xyz",
+                       "destination_type": "everynet_jsonrpc",
+                       "http_token":"foo!bar",
+                       "url": "http://localhost:8080/efgh"
+                     }
+           }
+}

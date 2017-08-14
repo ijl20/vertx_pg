@@ -1,0 +1,7 @@
+{
+  "method":"remove_sensor",
+  "params":{ "info": { "sensor_id": "abc",
+                       "sensor_type": "lorawan"
+                     }
+           }
+}
