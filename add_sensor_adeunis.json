@@ -1,0 +1,9 @@
+{
+  "method":"add_sensor",
+  "params":{ "info": { "sensor_id": "0018b2000000113e",
+                       "sensor_type": "lorawan",
+                       "destination_id": "test2",
+                       "destination_type": "everynet_jsonrpc"
+                     }
+           }
+}

@@ -1,0 +1,9 @@
+{
+  "method":"add_destination",
+  "params":{ "info": { "destination_id": "test2",
+                       "destination_type": "everynet_jsonrpc",
+                       "http_token":"foo!bar",
+                       "url": "http://localhost:8096/everynet_feed/test2/adeunis_test"
+                     }
+           }
+}
